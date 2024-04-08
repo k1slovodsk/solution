@@ -1,0 +1,81 @@
+package main
+
+import (
+    "database/sql"
+    "fmt"
+    "log"
+    "net/http"
+    "github.com/go-sql-driver/mysql"
+)
+
+var db  \* sql.DB
+var err error
+
+func initDB() {
+    // Используем MySQL драйвер для подключения к базе данных
+    db, err = sql.Open("mysql", "user:password@/dbname?parseTime=true")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    if err = db.Ping(); err != nil {
+        log.Fatal(err)
+    }
+}
+
+func searchHandler(w http.ResponseWriter, r  \* http.Request) {
+    if r.Method != "GET" {
+        http.Error(w, "Method is not supported.", http.StatusNotFound)
+        return
+    }
+
+    searchQuery := r.URL.Query().Get("query")
+    if searchQuery == "" {
+        http.Error(w, "Query parameter is missing", http.StatusBadRequest)
+        return
+    }
+
+    // Добавил параметризированнй запрос
+    query, err := db.Prepare(`SELECT  *  FROM products WHERE name LIKE ?`)
+    if err != nil {
+        http.Error(w, "Query preparation failed", http.StatusInternalServerError)
+        log.Println(err)
+        return
+    }
+    defer query.Close()
+
+    rows, err := query.Query(fmt.Sprintf("%%%s%%", searchQuery))
+    if err != nil {
+        http.Error(w, "Query execution failed", http.StatusInternalServerError)
+        log.Println(err)
+        return
+    }
+    defer rows.Close()
+
+    var products []string
+    for rows.Next() {
+        var name string
+        // Сканирование результатов с использованием безопасного метода
+        err := rows.Scan(&name)
+        if err != nil {
+            log.Fatal(err)
+        }
+        products = append(products, name)
+    }
+
+    if err = rows.Err(); err != nil {
+        log.Fatal(err)
+    }
+
+    fmt.Fprintf(w, "Found products: %v\n", products)
+}
+
+func main() {
+    initDB()
+    defer db.Close()
+
+    http.HandleFunc("/search", searchHandler)
+    fmt.Println("Server is running")
+    log.Fatal(http.ListenAndServe(":8080", nil))
+}
+// Открытый вопрос по поводу использования порта 8080  и зашифрованности соединения. 
